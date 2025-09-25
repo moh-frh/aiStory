@@ -21,7 +21,11 @@ import {
   Dimensions,
   Animated,
   PanResponder,
+  Image,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
+import { launchImageLibrary, launchCamera, ImagePickerResponse, MediaType, ImagePickerOptions } from 'react-native-image-picker';
 import { ChildInfo, StorySettings, Story } from './types/StoryTypes';
 
 type AppScreen = 'home' | 'settings' | 'story';
@@ -69,6 +73,150 @@ function App(): React.JSX.Element {
     { key: 'fairy-tale', label: 'Fairy Tale', emoji: '🏰', description: 'Classic tales with a twist' },
     { key: 'space', label: 'Space', emoji: '🚀', description: 'Journey through the stars' },
   ];
+
+  const requestStoragePermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        // For Android 13+ (API 33+), use READ_MEDIA_IMAGES
+        const androidVersion = Platform.Version;
+        console.log('Android version:', androidVersion);
+        
+        let permission;
+        if (androidVersion >= 33) {
+          permission = PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES;
+        } else {
+          permission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+        }
+
+        console.log('Requesting permission:', permission);
+        const granted = await PermissionsAndroid.request(
+          permission,
+          {
+            title: 'Photo Access Permission',
+            message: 'This app needs access to your photos to create personalized stories for your child.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'Allow',
+          }
+        );
+        
+        console.log('Permission result:', granted);
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (err) {
+        console.warn('Permission error:', err);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const requestCameraPermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: 'Camera Permission',
+            message: 'This app needs access to your camera to take photos for personalized stories.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'Allow',
+          }
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (err) {
+        console.warn('Camera permission error:', err);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handlePhotoUpload = async () => {
+    console.log('Photo upload button pressed');
+    
+    Alert.alert(
+      'Select Photo',
+      'Choose how you want to add a photo:',
+      [
+        {
+          text: 'Camera',
+          onPress: async () => {
+            const hasCameraPermission = await requestCameraPermission();
+            if (!hasCameraPermission) {
+              Alert.alert('Permission Required', 'Please grant camera permission to take photos.');
+              return;
+            }
+            openCamera();
+          }
+        },
+        {
+          text: 'Photo Library',
+          onPress: () => {
+            console.log('Photo library option selected');
+            // Try to open library directly - image picker handles permissions internally
+            openImageLibrary();
+          }
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
+  const openCamera = () => {
+    const options: ImagePickerOptions = {
+      mediaType: 'photo' as MediaType,
+      includeBase64: false,
+      maxHeight: 2000,
+      maxWidth: 2000,
+      quality: 0.8,
+    };
+
+    launchCamera(options, handleImagePickerResponse);
+  };
+
+  const openImageLibrary = () => {
+    console.log('Opening image library...');
+    const options: ImagePickerOptions = {
+      mediaType: 'photo' as MediaType,
+      includeBase64: false,
+      maxHeight: 2000,
+      maxWidth: 2000,
+      quality: 0.8,
+      selectionLimit: 1,
+    };
+
+    try {
+      launchImageLibrary(options, (response) => {
+        console.log('Image library response:', response);
+        handleImagePickerResponse(response);
+      });
+    } catch (error) {
+      console.error('Error launching image library:', error);
+      Alert.alert('Error', 'Failed to open photo library. Please try again.');
+    }
+  };
+
+  const handleImagePickerResponse = (response: ImagePickerResponse) => {
+    if (response.didCancel) {
+      console.log('User cancelled image picker');
+      return;
+    }
+    
+    if (response.errorMessage) {
+      console.log('ImagePicker Error: ', response.errorMessage);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+      return;
+    }
+
+    if (response.assets && response.assets[0]) {
+      setChildInfo(prev => ({ 
+        ...prev, 
+        photoUri: response.assets![0].uri || undefined 
+      }));
+      Alert.alert('Success', 'Photo added successfully!');
+    }
+  };
 
   const handleContinueFromHome = () => {
     if (!childInfo.name.trim()) {
@@ -299,13 +447,17 @@ function App(): React.JSX.Element {
               borderColor: isDarkMode ? '#444' : '#ddd',
               backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff'
             }]}
-            onPress={() => Alert.alert('Photo Upload', 'Photo upload feature will be available soon!')}
+            onPress={handlePhotoUpload}
           >
-            <View style={styles.photoPlaceholder}>
-              <Text style={[styles.photoPlaceholderText, { color: secondaryTextColor }]}>
-                📷 Tap to add photo
-              </Text>
-            </View>
+            {childInfo.photoUri ? (
+              <Image source={{ uri: childInfo.photoUri }} style={styles.photoPreview} />
+            ) : (
+              <View style={styles.photoPlaceholder}>
+                <Text style={[styles.photoPlaceholderText, { color: secondaryTextColor }]}>
+                  📷 Tap to add photo
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -472,6 +624,14 @@ function App(): React.JSX.Element {
 
         <View style={styles.storyPageContainer} {...panResponder.panHandlers}>
           <View style={[styles.storyPage, { backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff' }]}>
+            {childInfo.photoUri && (
+              <View style={styles.storyPhotoContainer}>
+                <Image source={{ uri: childInfo.photoUri }} style={styles.storyPhoto} />
+                <Text style={[styles.storyPhotoLabel, { color: secondaryTextColor }]}>
+                  {childInfo.name}
+                </Text>
+              </View>
+            )}
             <Text style={[styles.pageNumber, { color: secondaryTextColor }]}>
               Page {currentPageData.pageNumber}
             </Text>
@@ -631,6 +791,11 @@ const styles = StyleSheet.create({
   photoPlaceholderText: {
     fontSize: 16,
   },
+  photoPreview: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 10,
+  },
   continueButton: {
     borderRadius: 12,
     paddingVertical: 16,
@@ -771,6 +936,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 10,
     fontStyle: 'italic',
+  },
+  storyPhotoContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  storyPhoto: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: '#007AFF',
+  },
+  storyPhotoLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
   },
   storyContainer: {
     flex: 1,
