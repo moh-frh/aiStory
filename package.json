@@ -2,6 +2,7 @@
   "name": "aiStory",
   "version": "0.0.1",
   "private": true,
+  "description": "AI-powered story generator for kids that creates personalized stories where children become the heroes of their own adventures",
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
