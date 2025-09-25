@@ -11,6 +11,7 @@ export interface StorySettings {
 
 export interface StoryPage {
   id: string;
+  title: string;
   text: string;
   illustrationUri?: string;
   pageNumber: number;

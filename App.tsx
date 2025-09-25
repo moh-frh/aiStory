@@ -25,7 +25,7 @@ import {
   PermissionsAndroid,
   Platform,
 } from 'react-native';
-import { launchImageLibrary, launchCamera, ImagePickerResponse, MediaType, ImagePickerOptions } from 'react-native-image-picker';
+import { launchImageLibrary, launchCamera, ImagePickerResponse, MediaType } from 'react-native-image-picker';
 import { ChildInfo, StorySettings, Story } from './types/StoryTypes';
 
 type AppScreen = 'home' | 'settings' | 'story';
@@ -164,12 +164,12 @@ function App(): React.JSX.Element {
   };
 
   const openCamera = () => {
-    const options: ImagePickerOptions = {
+    const options = {
       mediaType: 'photo' as MediaType,
       includeBase64: false,
       maxHeight: 2000,
       maxWidth: 2000,
-      quality: 0.8,
+      quality: 0.8 as const,
     };
 
     launchCamera(options, handleImagePickerResponse);
@@ -177,12 +177,12 @@ function App(): React.JSX.Element {
 
   const openImageLibrary = () => {
     console.log('Opening image library...');
-    const options: ImagePickerOptions = {
+    const options = {
       mediaType: 'photo' as MediaType,
       includeBase64: false,
       maxHeight: 2000,
       maxWidth: 2000,
-      quality: 0.8,
+      quality: 0.8 as const,
       selectionLimit: 1,
     };
 
@@ -226,158 +226,416 @@ function App(): React.JSX.Element {
     setCurrentScreen('settings');
   };
 
+  // AI Story Generation System
+  const generateRandomElement = (array: string[]) => {
+    return array[Math.floor(Math.random() * array.length)];
+  };
+
   const generateStoryContent = (storyType: string, childName: string, readingLength: string) => {
-    const baseStories = {
-      superhero: {
-        short: [
-          `Once upon a time, there was a brave young hero named ${childName}.`,
-          `${childName} discovered they had amazing superpowers and could help everyone in need.`,
-          `And so ${childName} became the greatest superhero the world had ever known!`
-        ],
-        medium: [
-          `Once upon a time, there was a brave young hero named ${childName}.`,
-          `${childName} lived in a small town where everyone knew each other. One day, strange things started happening - objects were floating, lights were flickering, and people were scared.`,
-          `${childName} discovered they had amazing superpowers! They could fly, lift heavy objects, and even read minds.`,
-          `With their new powers, ${childName} decided to help their neighbors. They rescued a cat from a tree, helped an elderly person cross the street, and even stopped a runaway bicycle.`,
-          `Word spread about the young hero, and soon everyone in town was talking about ${childName}'s amazing deeds.`,
-          `And so ${childName} became the greatest superhero the world had ever known, protecting their town with kindness and courage!`
-        ],
-        long: [
-          `Once upon a time, in a bustling city filled with skyscrapers and busy streets, there lived a brave young hero named ${childName}.`,
-          `${childName} was an ordinary kid who loved helping others, but they never imagined they would become a real superhero.`,
-          `One stormy night, while ${childName} was walking home from school, they saw a bright light streak across the sky and crash into a nearby park.`,
-          `Curious and brave, ${childName} ran to investigate. In the crater, they found a mysterious glowing crystal that seemed to pulse with energy.`,
-          `As ${childName} reached out to touch the crystal, a surge of power coursed through their body. Suddenly, they could fly, had super strength, and could see through walls!`,
-          `At first, ${childName} was scared of their new powers, but they remembered their parents' words: "With great power comes great responsibility."`,
-          `The next day, ${childName} decided to use their powers for good. They started small - helping lost children find their parents, rescuing animals, and stopping bullies at school.`,
-          `News of the young hero spread quickly through the city. People began calling ${childName} "The Guardian" because they protected everyone with such kindness and wisdom.`,
-          `One day, a terrible villain threatened to destroy the city's power grid. ${childName} knew this was their biggest challenge yet.`,
-          `Using their superpowers and quick thinking, ${childName} outsmarted the villain and saved the city. Everyone cheered for their young hero.`,
-          `From that day forward, ${childName} continued to protect the city, proving that true heroism comes from the heart, not just superpowers.`,
-          `And so ${childName} became the greatest superhero the world had ever known, inspiring others to be kind and brave every day!`
-        ]
-      },
-      adventure: {
-        short: [
-          `Meet ${childName}, a brave young explorer who loved discovering new places.`,
-          `One day, ${childName} found a mysterious map that led to a hidden treasure.`,
-          `After an exciting journey, ${childName} discovered that the real treasure was the adventure itself!`
-        ],
-        medium: [
-          `Meet ${childName}, a brave young explorer who loved discovering new places and solving mysteries.`,
-          `One sunny morning, ${childName} found a mysterious map hidden in an old book at the library. The map showed a path to a secret island.`,
-          `Excited by the discovery, ${childName} packed a backpack with supplies and set off on their adventure.`,
-          `The journey was filled with challenges - crossing a rickety bridge, solving puzzles, and making friends with talking animals.`,
-          `When ${childName} finally reached the island, they discovered a chest filled with gold coins and precious gems.`,
-          `But the greatest treasure of all was the confidence and courage ${childName} gained from their amazing adventure!`
-        ],
-        long: [
-          `Meet ${childName}, a brave young explorer with an insatiable curiosity about the world around them.`,
-          `One rainy afternoon, while exploring their grandmother's attic, ${childName} discovered an ancient map covered in mysterious symbols.`,
-          `The map showed the location of a legendary treasure hidden on a remote island that no one had ever found.`,
-          `Determined to solve the mystery, ${childName} spent weeks researching the symbols and preparing for their journey.`,
-          `With a backpack full of supplies and a heart full of courage, ${childName} set sail on a small boat toward the mysterious island.`,
-          `The journey was treacherous - stormy seas, dangerous creatures, and tricky navigation challenges tested ${childName}'s resolve.`,
-          `Along the way, ${childName} met a wise old sea turtle who became their guide and taught them about the ocean's secrets.`,
-          `When they finally reached the island, ${childName} had to solve a series of ancient puzzles to find the treasure's hiding place.`,
-          `The final challenge was a maze of caves where ${childName} had to use their wits and courage to navigate safely.`,
-          `At the center of the maze, ${childName} found the legendary treasure - a chest filled with gold, jewels, and magical artifacts.`,
-          `But more valuable than any treasure was the wisdom ${childName} gained: that the greatest adventures come from following your dreams and never giving up.`,
-          `When ${childName} returned home, they shared their story and inspired other children to embark on their own adventures of discovery!`
-        ]
-      },
-      fantasy: {
-        short: [
-          `In a magical kingdom, there lived a young wizard named ${childName}.`,
-          `${childName} learned to cast spells and help magical creatures in need.`,
-          `Soon, ${childName} became the most powerful and kind wizard in all the land!`
-        ],
-        medium: [
-          `In a magical kingdom filled with talking animals and enchanted forests, there lived a young wizard named ${childName}.`,
-          `${childName} discovered their magical powers when they accidentally turned their pet cat into a dragon (don't worry, they turned it back!).`,
-          `Under the guidance of a wise old wizard, ${childName} learned to cast spells, brew potions, and communicate with magical creatures.`,
-          `One day, a dark shadow threatened to cover the kingdom in eternal night. ${childName} knew they had to help.`,
-          `Using their magic and the help of their new creature friends, ${childName} cast a powerful spell that banished the darkness forever.`,
-          `The kingdom celebrated ${childName} as their greatest hero, and they continued to use their magic to help others every day!`
-        ],
-        long: [
-          `In a magical kingdom where dragons soared through rainbow clouds and unicorns grazed in crystal meadows, there lived a young wizard named ${childName}.`,
-          `${childName} had always felt different from other children, but they never imagined they possessed the ancient gift of magic.`,
-          `One fateful day, while playing in the Enchanted Forest, ${childName} accidentally cast their first spell - making flowers bloom in winter.`,
-          `A wise old wizard named Merlin appeared and explained that ${childName} was the chosen one, destined to protect the magical realm.`,
-          `Under Merlin's guidance, ${childName} began their magical training, learning to cast spells, brew potions, and communicate with magical creatures.`,
-          `They made friends with a talking owl named Hoot, a mischievous fairy named Sparkle, and a gentle giant named Goliath.`,
-          `When an evil sorcerer threatened to steal all the magic from the kingdom, ${childName} knew they had to act.`,
-          `The young wizard embarked on a quest to find the legendary Crystal of Light, the only thing that could defeat the sorcerer.`,
-          `Their journey took them through the Whispering Woods, across the Singing River, and up the Mountain of Echoes.`,
-          `With the help of their magical friends and their growing powers, ${childName} found the crystal and learned the most important spell of all.`,
-          `In a final battle of light against darkness, ${childName} used the power of friendship and courage to defeat the sorcerer and restore magic to the kingdom.`,
-          `From that day forward, ${childName} became the greatest wizard the kingdom had ever known, using their magic to spread joy and help others!`
-        ]
-      },
-      'fairy-tale': {
-        short: [
-          `Once upon a time, there was a kind princess named ${childName}.`,
-          `${childName} helped a lost fairy find her way home.`,
-          `In return, the fairy granted ${childName} the gift of making everyone happy!`
-        ],
-        medium: [
-          `Once upon a time, in a kingdom far, far away, there lived a kind and brave princess named ${childName}.`,
-          `${childName} was known throughout the kingdom for their kindness to all creatures, great and small.`,
-          `One day, while walking in the royal garden, ${childName} found a tiny fairy trapped in a spider's web.`,
-          `Gently, ${childName} freed the fairy, who introduced herself as Twinkle, the Queen of the Flower Fairies.`,
-          `To thank ${childName} for their kindness, Twinkle granted them a special gift - the ability to make anyone smile with just a kind word.`,
-          `From that day forward, ${childName} used their gift to spread happiness throughout the kingdom, and everyone lived happily ever after!`
-        ],
-        long: [
-          `Once upon a time, in a magnificent kingdom where castles touched the clouds and gardens bloomed with flowers that sang, there lived a kind and brave princess named ${childName}.`,
-          `${childName} was beloved by all the kingdom's subjects, not because of their royal title, but because of their pure heart and endless compassion.`,
-          `One magical morning, while exploring the royal garden, ${childName} heard the sound of tiny sobs coming from a rose bush.`,
-          `Curious and concerned, ${childName} discovered a beautiful fairy named Twinkle trapped in a spider's web, her delicate wings tangled and torn.`,
-          `With gentle hands and a caring heart, ${childName} carefully freed the fairy, speaking words of comfort and hope.`,
-          `Twinkle, who was actually the Queen of the Flower Fairies, was so moved by ${childName}'s kindness that she decided to grant them a very special gift.`,
-          `"You have shown me that true royalty comes from the heart," said Twinkle. "I grant you the power to bring joy and happiness to everyone you meet."`,
-          `From that moment on, ${childName} discovered they could make flowers bloom with a smile, make sad people laugh with a kind word, and bring hope to the hopeless.`,
-          `News of the magical princess spread throughout the kingdom and beyond. People traveled from distant lands just to experience ${childName}'s gift of joy.`,
-          `One day, a terrible sadness fell over the kingdom when a dark cloud of despair threatened to cover the land.`,
-          `Using their gift of spreading happiness, ${childName} organized a great celebration where everyone shared their talents and helped each other.`,
-          `The power of joy and togetherness banished the dark cloud forever, and the kingdom became the happiest place in all the world.`,
-          `And so ${childName} lived happily ever after, proving that the greatest magic of all is the power of love, kindness, and making others smile!`
-        ]
-      },
-      space: {
-        short: [
-          `Meet ${childName}, a young astronaut who dreamed of exploring the stars.`,
-          `One day, ${childName} got to pilot a rocket ship to a distant planet.`,
-          `There, they made friends with friendly aliens and discovered the wonders of space!`
-        ],
-        medium: [
-          `Meet ${childName}, a young astronaut with big dreams of exploring the universe and discovering new worlds.`,
-          `One day, ${childName} was chosen to pilot a special rocket ship on a mission to explore a mysterious planet called Zephyria.`,
-          `As they traveled through space, ${childName} saw amazing sights - colorful nebulas, dancing comets, and planets with rings of light.`,
-          `When they landed on Zephyria, ${childName} discovered a planet filled with friendly aliens who had never seen a human before.`,
-          `The aliens taught ${childName} about their culture, their advanced technology, and their peaceful way of life.`,
-          `${childName} shared stories about Earth, and together they formed a friendship that would last across the stars forever!`
-        ],
-        long: [
-          `Meet ${childName}, a brilliant young astronaut whose imagination soared higher than any rocket ship.`,
-          `From a young age, ${childName} was fascinated by the stars, spending countless nights gazing at the night sky and dreaming of space adventures.`,
-          `When they grew up, ${childName} became the youngest astronaut ever selected for a top-secret mission to explore the Andromeda Galaxy.`,
-          `Their spaceship, the Stellar Explorer, was equipped with the most advanced technology, including a universal translator and a gravity generator.`,
-          `As ${childName} journeyed through the cosmos, they encountered breathtaking phenomena - dancing auroras, crystal asteroids, and a planet made entirely of water.`,
-          `On a distant planet called Lumina, ${childName} discovered an ancient civilization of peaceful aliens who had been waiting for a visitor from Earth.`,
-          `The Lumina people, who glowed with inner light, taught ${childName} about their advanced science, their philosophy of universal harmony, and their ability to communicate through thought.`,
-          `Together, ${childName} and the Lumina people worked to solve a cosmic mystery - why the stars in their galaxy were slowly dimming.`,
-          `Using Earth technology and Lumina wisdom, they discovered that the stars needed a special kind of energy to keep shining.`,
-          `${childName} helped create a device that could restore the stars' brightness, saving not just one planet, but an entire galaxy.`,
-          `In gratitude, the Lumina people gave ${childName} a crystal that would allow them to communicate with any intelligent life in the universe.`,
-          `When ${childName} returned to Earth, they shared their incredible discoveries and inspired a new generation of space explorers to reach for the stars!`
-        ]
+    // Story elements for randomization
+    const locations = {
+      superhero: ['a bustling city', 'a quiet neighborhood', 'a magical town', 'a futuristic metropolis', 'a coastal village'],
+      adventure: ['a mysterious island', 'an ancient forest', 'a hidden valley', 'a mountain peak', 'a secret cave'],
+      fantasy: ['a magical kingdom', 'an enchanted realm', 'a mystical forest', 'a crystal palace', 'a floating island'],
+      'fairy-tale': ['a royal castle', 'a magical garden', 'a fairy glen', 'a wishing well', 'a rainbow bridge'],
+      space: ['a distant planet', 'a space station', 'a nebula', 'an asteroid field', 'a galaxy far away']
+    };
+
+    const powers = ['super strength', 'the ability to fly', 'invisibility', 'telepathy', 'healing powers', 'super speed', 'shape-shifting', 'mind control'];
+    const challenges = ['a lost pet', 'a broken bridge', 'a crying child', 'a dangerous storm', 'a locked door', 'a runaway vehicle', 'a trapped animal', 'a confused elderly person'];
+    const villains = ['the Shadow Master', 'Dr. Chaos', 'the Storm King', 'Captain Darkness', 'the Time Thief', 'Professor Mischief', 'the Ice Queen', 'the Shadow Dragon'];
+    const friends = ['a wise owl', 'a talking cat', 'a friendly robot', 'a magical fairy', 'a brave dog', 'a clever fox', 'a gentle giant', 'a sparkling unicorn'];
+
+    const getStoryLength = (length: string) => {
+      switch (length) {
+        case 'short': return { min: 3, max: 4 };
+        case 'medium': return { min: 5, max: 7 };
+        case 'long': return { min: 8, max: 12 };
+        default: return { min: 5, max: 7 };
       }
     };
 
-    const storyContent = baseStories[storyType as keyof typeof baseStories]?.[readingLength as keyof typeof baseStories.superhero] || baseStories.superhero.medium;
-    return storyContent;
+    const lengthConfig = getStoryLength(readingLength);
+    const storyLength = Math.floor(Math.random() * (lengthConfig.max - lengthConfig.min + 1)) + lengthConfig.min;
+    
+    let story = [];
+    const location = generateRandomElement(locations[storyType as keyof typeof locations] || locations.superhero);
+    const power = generateRandomElement(powers);
+    const challenge = generateRandomElement(challenges);
+    const villain = generateRandomElement(villains);
+    const friend = generateRandomElement(friends);
+
+    // Generate story based on type and length
+    if (storyType === 'superhero') {
+      story = generateSuperheroStory(childName, location, power, challenge, villain, storyLength);
+    } else if (storyType === 'adventure') {
+      story = generateAdventureStory(childName, location, challenge, friend, storyLength);
+    } else if (storyType === 'fantasy') {
+      story = generateFantasyStory(childName, location, power, friend, villain, storyLength);
+    } else if (storyType === 'fairy-tale') {
+      story = generateFairyTaleStory(childName, location, challenge, friend, storyLength);
+    } else if (storyType === 'space') {
+      story = generateSpaceStory(childName, location, challenge, friend, storyLength);
+    } else {
+      story = generateSuperheroStory(childName, location, power, challenge, villain, storyLength);
+    }
+
+    return story;
+  };
+
+  const generateSuperheroStory = (childName: string, location: string, power: string, challenge: string, villain: string, length: number) => {
+    const story = [];
+    
+    // Opening
+    story.push({
+      title: `The Hero of ${location.split(' ').pop()}`,
+      text: `In ${location}, there lived a brave young hero named ${childName}.`
+    });
+    
+    if (length >= 3) {
+      story.push({
+        title: `A Call to Help`,
+        text: `One day, while walking through the streets, ${childName} noticed ${challenge} and knew they had to help.`
+      });
+    }
+    
+    if (length >= 4) {
+      story.push({
+        title: `The Power Awakens`,
+        text: `Suddenly, ${childName} felt a strange energy coursing through their body. They discovered they had ${power}!`
+      });
+    }
+    
+    if (length >= 5) {
+      story.push({
+        title: `First Heroic Act`,
+        text: `Using their new ability, ${childName} helped solve the problem and felt a deep sense of purpose.`
+      });
+    }
+    
+    if (length >= 6) {
+      story.push({
+        title: `Rising Fame`,
+        text: `Word spread about the young hero, and soon people began calling ${childName} "The Guardian of ${location.split(' ').pop()}".`
+      });
+    }
+    
+    if (length >= 7) {
+      story.push({
+        title: `The Dark Threat`,
+        text: `But then, a new threat emerged: ${villain} was causing chaos throughout the city.`
+      });
+    }
+    
+    if (length >= 8) {
+      story.push({
+        title: `The Ultimate Challenge`,
+        text: `${childName} knew this was their biggest challenge yet. They had to use all their courage and ${power} to stop the villain.`
+      });
+    }
+    
+    if (length >= 9) {
+      story.push({
+        title: `Epic Battle`,
+        text: `In an epic battle, ${childName} outsmarted ${villain} and saved the day. Everyone cheered for their young hero.`
+      });
+    }
+    
+    if (length >= 10) {
+      story.push({
+        title: `A Hero's Legacy`,
+        text: `From that day forward, ${childName} continued to protect ${location}, proving that true heroism comes from the heart.`
+      });
+    }
+    
+    // Ending
+    story.push({
+      title: `The Greatest Hero`,
+      text: `And so ${childName} became the greatest superhero the world had ever known, inspiring others to be kind and brave every day!`
+    });
+    
+    return story;
+  };
+
+  const generateAdventureStory = (childName: string, location: string, challenge: string, friend: string, length: number) => {
+    const story = [];
+    
+    story.push({
+      title: `The Curious Explorer`,
+      text: `Meet ${childName}, a brave young explorer who loved discovering new places.`
+    });
+    
+    if (length >= 3) {
+      story.push({
+        title: `The Mysterious Map`,
+        text: `One day, ${childName} found a mysterious map that led to ${location}.`
+      });
+    }
+    
+    if (length >= 4) {
+      story.push({
+        title: `The Journey Begins`,
+        text: `Excited by the discovery, ${childName} packed their backpack and set off on their adventure.`
+      });
+    }
+    
+    if (length >= 5) {
+      story.push({
+        title: `A New Friend`,
+        text: `Along the way, ${childName} met ${friend}, who became their trusted companion.`
+      });
+    }
+    
+    if (length >= 6) {
+      story.push({
+        title: `Facing Challenges`,
+        text: `The journey was filled with challenges - ${challenge} tested ${childName}'s resolve.`
+      });
+    }
+    
+    if (length >= 7) {
+      story.push({
+        title: `Overcoming Obstacles`,
+        text: `With ${friend}'s help, ${childName} overcame every obstacle and learned valuable lessons about courage and friendship.`
+      });
+    }
+    
+    if (length >= 8) {
+      story.push({
+        title: `The Hidden Treasure`,
+        text: `When they finally reached ${location}, ${childName} discovered a treasure beyond their wildest dreams.`
+      });
+    }
+    
+    if (length >= 9) {
+      story.push({
+        title: `The Real Treasure`,
+        text: `But the greatest treasure of all was the confidence and wisdom ${childName} gained from their amazing adventure.`
+      });
+    }
+    
+    story.push({
+      title: `The Adventure Continues`,
+      text: `From that day forward, ${childName} continued to explore the world, always ready for the next great adventure!`
+    });
+    
+    return story;
+  };
+
+  const generateFantasyStory = (childName: string, location: string, power: string, friend: string, villain: string, length: number) => {
+    const story = [];
+    
+    story.push({
+      title: `The Young Wizard`,
+      text: `In ${location}, there lived a young wizard named ${childName}.`
+    });
+    
+    if (length >= 3) {
+      story.push({
+        title: `The Ancient Gift`,
+        text: `One magical morning, ${childName} discovered they possessed the ancient gift of ${power}.`
+      });
+    }
+    
+    if (length >= 4) {
+      story.push({
+        title: `The Wise Mentor`,
+        text: `A wise mentor appeared and began teaching ${childName} how to control their magical abilities.`
+      });
+    }
+    
+    if (length >= 5) {
+      story.push({
+        title: `A Magical Companion`,
+        text: `${childName} made friends with ${friend}, who became their magical companion.`
+      });
+    }
+    
+    if (length >= 6) {
+      story.push({
+        title: `Learning Balance`,
+        text: `Together, they learned about the balance between light and dark magic.`
+      });
+    }
+    
+    if (length >= 7) {
+      story.push({
+        title: `The Dark Threat`,
+        text: `But then, ${villain} threatened to steal all the magic from ${location}.`
+      });
+    }
+    
+    if (length >= 8) {
+      story.push({
+        title: `Preparing for Battle`,
+        text: `${childName} knew they had to act. With ${friend}'s help, they prepared for the ultimate magical battle.`
+      });
+    }
+    
+    if (length >= 9) {
+      story.push({
+        title: `The Final Battle`,
+        text: `Using their ${power} and the power of friendship, ${childName} defeated ${villain} and restored magic to the realm.`
+      });
+    }
+    
+    if (length >= 10) {
+      story.push({
+        title: `The Greatest Wizard`,
+        text: `From that day forward, ${childName} became the greatest wizard the kingdom had ever known.`
+      });
+    }
+    
+    story.push({
+      title: `Magic from the Heart`,
+      text: `They continued to use their magic to spread joy and help others, proving that true magic comes from the heart!`
+    });
+    
+    return story;
+  };
+
+  const generateFairyTaleStory = (childName: string, location: string, challenge: string, friend: string, length: number) => {
+    const story = [];
+    
+    story.push({
+      title: `The Kind Princess`,
+      text: `Once upon a time, in ${location}, there lived a kind princess named ${childName}.`
+    });
+    
+    if (length >= 3) {
+      story.push({
+        title: `A Heart of Gold`,
+        text: `${childName} was known throughout the kingdom for their kindness to all creatures, great and small.`
+      });
+    }
+    
+    if (length >= 4) {
+      story.push({
+        title: `A Cry for Help`,
+        text: `One day, while exploring the royal gardens, ${childName} found ${challenge} and knew they had to help.`
+      });
+    }
+    
+    if (length >= 5) {
+      story.push({
+        title: `A Magical Meeting`,
+        text: `Gently, ${childName} helped solve the problem, and in return, they met ${friend}.`
+      });
+    }
+    
+    if (length >= 6) {
+      story.push({
+        title: `A Special Gift`,
+        text: `${friend} was so moved by ${childName}'s kindness that they granted them a special gift.`
+      });
+    }
+    
+    if (length >= 7) {
+      story.push({
+        title: `The Power of Kindness`,
+        text: `"You have shown me that true royalty comes from the heart," said ${friend}. "I grant you the power to bring joy to everyone you meet."`
+      });
+    }
+    
+    if (length >= 8) {
+      story.push({
+        title: `Magical Abilities`,
+        text: `From that moment on, ${childName} discovered they could make flowers bloom with a smile and bring hope to the hopeless.`
+      });
+    }
+    
+    if (length >= 9) {
+      story.push({
+        title: `Fame Spreads`,
+        text: `News of the magical princess spread throughout the kingdom, and people traveled from distant lands to experience ${childName}'s gift.`
+      });
+    }
+    
+    if (length >= 10) {
+      story.push({
+        title: `Banishing Darkness`,
+        text: `When darkness threatened the kingdom, ${childName} used their gift to organize a great celebration that banished the darkness forever.`
+      });
+    }
+    
+    story.push({
+      title: `Happily Ever After`,
+      text: `And so ${childName} lived happily ever after, proving that the greatest magic of all is the power of love and kindness!`
+    });
+    
+    return story;
+  };
+
+  const generateSpaceStory = (childName: string, location: string, challenge: string, friend: string, length: number) => {
+    const story = [];
+    
+    story.push({
+      title: `The Young Astronaut`,
+      text: `Meet ${childName}, a brilliant young astronaut whose imagination soared higher than any rocket ship.`
+    });
+    
+    if (length >= 3) {
+      story.push({
+        title: `The Secret Mission`,
+        text: `One day, ${childName} was chosen for a top-secret mission to explore ${location}.`
+      });
+    }
+    
+    if (length >= 4) {
+      story.push({
+        title: `The Stellar Explorer`,
+        text: `Their spaceship, the Stellar Explorer, was equipped with the most advanced technology ever created.`
+      });
+    }
+    
+    if (length >= 5) {
+      story.push({
+        title: `Cosmic Wonders`,
+        text: `As ${childName} journeyed through space, they encountered breathtaking phenomena and cosmic wonders.`
+      });
+    }
+    
+    if (length >= 6) {
+      story.push({
+        title: `First Contact`,
+        text: `On ${location}, ${childName} discovered an ancient civilization and met ${friend}.`
+      });
+    }
+    
+    if (length >= 7) {
+      story.push({
+        title: `Learning Together`,
+        text: `${friend} taught ${childName} about their advanced science and philosophy of universal harmony.`
+      });
+    }
+    
+    if (length >= 8) {
+      story.push({
+        title: `The Cosmic Mystery`,
+        text: `Together, they worked to solve a cosmic mystery: ${challenge}.`
+      });
+    }
+    
+    if (length >= 9) {
+      story.push({
+        title: `Saving the Galaxy`,
+        text: `Using Earth technology and alien wisdom, they discovered a solution that saved not just one planet, but an entire galaxy.`
+      });
+    }
+    
+    if (length >= 10) {
+      story.push({
+        title: `A Gift of Communication`,
+        text: `In gratitude, ${friend} gave ${childName} a crystal that would allow them to communicate with any intelligent life in the universe.`
+      });
+    }
+    
+    story.push({
+      title: `Inspiring Future Explorers`,
+      text: `When ${childName} returned to Earth, they shared their incredible discoveries and inspired a new generation of space explorers!`
+    });
+    
+    return story;
   };
 
   const handleGenerateStory = () => {
@@ -395,11 +653,23 @@ function App(): React.JSX.Element {
         readingLength: selectedReadingLength as any,
         storyType: selectedStoryType as any,
       },
-      pages: storyContent.map((text, index) => ({
-        id: (index + 1).toString(),
-        text: text,
-        pageNumber: index + 1,
-      })),
+      pages: storyContent.map((page, index) => {
+        if (typeof page === 'string') {
+          return {
+            id: (index + 1).toString(),
+            title: `Page ${index + 1}`,
+            text: page,
+            pageNumber: index + 1,
+          };
+        } else {
+          return {
+            id: (index + 1).toString(),
+            title: page.title,
+            text: page.text,
+            pageNumber: index + 1,
+          };
+        }
+      }),
       createdAt: new Date(),
       isCompleted: false,
     };
@@ -632,8 +902,8 @@ function App(): React.JSX.Element {
                 </Text>
               </View>
             )}
-            <Text style={[styles.pageNumber, { color: secondaryTextColor }]}>
-              Page {currentPageData.pageNumber}
+            <Text style={[styles.pageTitle, { color: textColor }]}>
+              {currentPageData.title}
             </Text>
             <Text style={[styles.storyText, { color: textColor }]}>
               {currentPageData.text}
@@ -972,6 +1242,13 @@ const styles = StyleSheet.create({
   },
   pageContainer: {
     marginBottom: 20,
+  },
+  pageTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 15,
+    marginTop: 10,
   },
   pageNumber: {
     fontSize: 12,
