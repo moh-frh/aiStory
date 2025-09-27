@@ -163,8 +163,9 @@ export class LocalAIService {
 
     const template = storyTemplates[theme.id as keyof typeof storyTemplates] || storyTemplates.forest;
     
-    // Generate dynamic story pages based on length
-    const pageCount = length === 'short' ? 5 : length === 'medium' ? 7 : 15;
+    // Generate dynamic story pages based on reading time
+    // Short: 2-3 minutes (3-4 pages), Medium: 5-7 minutes (6-8 pages), Long: 10-15 minutes (12-15 pages)
+    const pageCount = length === 'short' ? 4 : length === 'medium' ? 7 : 15;
     const stories: Array<{ title: string; text: string }> = [];
     
     for (let i = 0; i < pageCount; i++) {

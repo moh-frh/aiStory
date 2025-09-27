@@ -42,8 +42,64 @@ function App(): React.JSX.Element {
   const [currentThemeIndex, setCurrentThemeIndex] = useState(0);
   const themeAnimation = useRef(new Animated.Value(0)).current;
   
-  // Story length selection
+  // Story length selection with swipe
   const [selectedStoryLength, setSelectedStoryLength] = useState<'short' | 'medium' | 'long'>('medium');
+  const [currentLengthIndex, setCurrentLengthIndex] = useState(1); // Start with medium (index 1)
+  const lengthAnimation = useRef(new Animated.Value(0)).current;
+  
+  const storyLengths = ['short', 'medium', 'long'] as const;
+
+  // Story length swipe navigation
+  const handleLengthSwipe = (direction: 'left' | 'right') => {
+    if (direction === 'left' && currentLengthIndex < storyLengths.length - 1) {
+      setCurrentLengthIndex(currentLengthIndex + 1);
+      setSelectedStoryLength(storyLengths[currentLengthIndex + 1]);
+    } else if (direction === 'right' && currentLengthIndex > 0) {
+      setCurrentLengthIndex(currentLengthIndex - 1);
+      setSelectedStoryLength(storyLengths[currentLengthIndex - 1]);
+    }
+  };
+
+  // Story length swipe PanResponder
+  const lengthPanResponder = useMemo(() => 
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasMinimumDistance = Math.abs(gestureState.dx) > 20;
+        return isHorizontalSwipe && hasMinimumDistance;
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        lengthAnimation.setValue(gestureState.dx * 0.5);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const { dx, vx } = gestureState;
+        const threshold = 50;
+        const velocityThreshold = 0.3;
+
+        if (dx > threshold || vx > velocityThreshold) {
+          handleLengthSwipe('right');
+        } else if (dx < -threshold || vx < -velocityThreshold) {
+          handleLengthSwipe('left');
+        }
+
+        Animated.spring(lengthAnimation, {
+          toValue: 0,
+          tension: 120,
+          friction: 8,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(lengthAnimation, {
+          toValue: 0,
+          tension: 120,
+          friction: 8,
+          useNativeDriver: true,
+        }).start();
+      },
+    }), [currentLengthIndex, lengthAnimation]
+  );
 
   // Theme swipe navigation
   const handleThemeSwipe = (direction: 'left' | 'right') => {
@@ -263,6 +319,9 @@ function App(): React.JSX.Element {
       setSelectedTheme(THEMES[0]);
       setCurrentThemeIndex(0);
     }
+    // Initialize story length to medium
+    setSelectedStoryLength('medium');
+    setCurrentLengthIndex(1);
   }, []);
 
 
@@ -483,6 +542,63 @@ function App(): React.JSX.Element {
         {/* Swipe Instructions */}
         <Text style={[styles.swipeInstruction, { color: isDarkMode ? '#cccccc' : '#666666' }]}>
           ← Swipe to choose theme →
+        </Text>
+      </View>
+    );
+  };
+
+  // Render story length selection with swipe
+  const renderStoryLengthSelection = () => {
+    const currentLength = storyLengths[currentLengthIndex];
+    const lengthInfo = {
+      short: { icon: '📖', name: 'Short Story', description: 'Quick 2-3 minute read', color: '#FF6B35' },
+      medium: { icon: '📚', name: 'Medium Story', description: 'Balanced 5-7 minute read', color: '#4ECDC4' },
+      long: { icon: '📜', name: 'Long Story', description: 'Epic 10-15 minute read', color: '#45B7D1' }
+    };
+    
+    const currentInfo = lengthInfo[currentLength];
+    
+    return (
+      <View style={styles.storyLengthSelectionContainer}>
+        {/* Story Length Card */}
+        <Animated.View
+          style={[
+            styles.storyLengthCard,
+            {
+              backgroundColor: currentInfo.color,
+              transform: [{ translateX: lengthAnimation }]
+            }
+          ]}
+          {...lengthPanResponder.panHandlers}
+        >
+          <Text style={styles.storyLengthIcon}>{currentInfo.icon}</Text>
+          <Text style={[styles.storyLengthName, { color: '#ffffff' }]}>
+            {currentInfo.name}
+          </Text>
+          <Text style={[styles.storyLengthDescription, { color: '#ffffff' }]}>
+            {currentInfo.description}
+          </Text>
+        </Animated.View>
+        
+        {/* Story Length Dots */}
+        <View style={styles.storyLengthDotsContainer}>
+          {storyLengths.map((_, index) => (
+            <View
+              key={index}
+              style={[
+                styles.storyLengthDot,
+                {
+                  backgroundColor: index === currentLengthIndex ? currentInfo.color : isDarkMode ? '#666' : '#ccc',
+                  opacity: index === currentLengthIndex ? 1 : 0.5
+                }
+              ]}
+            />
+          ))}
+        </View>
+        
+        {/* Swipe Instructions */}
+        <Text style={[styles.swipeInstruction, { color: isDarkMode ? '#cccccc' : '#666666' }]}>
+          ← Swipe to choose length →
         </Text>
       </View>
     );
@@ -719,30 +835,7 @@ function App(): React.JSX.Element {
           {/* Story Length Selection */}
           <View style={styles.storyLengthSection}>
             <Text style={[styles.sectionTitle, { color: textColor }]}>3. Story Length</Text>
-            <View style={styles.storyLengthContainer}>
-              {(['short', 'medium', 'long'] as const).map((length) => (
-                <TouchableOpacity
-                  key={length}
-                  style={[
-                    styles.storyLengthButton,
-                    {
-                      backgroundColor: selectedStoryLength === length ? '#007AFF' : isDarkMode ? '#2a2a2a' : '#ffffff',
-                      borderColor: selectedStoryLength === length ? '#007AFF' : isDarkMode ? '#444' : '#ddd',
-                    }
-                  ]}
-                  onPress={() => setSelectedStoryLength(length)}
-                >
-                  <Text style={[
-                    styles.storyLengthText,
-                    { color: selectedStoryLength === length ? '#ffffff' : textColor }
-                  ]}>
-                    {length === 'short' ? '📖 Short (5 pages)' : 
-                     length === 'medium' ? '📚 Medium (7 pages)' : 
-                     '📜 Long (15 pages)'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {renderStoryLengthSelection()}
           </View>
 
 
@@ -898,18 +991,44 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 30,
   },
-  storyLengthContainer: {
-    gap: 10,
-  },
-  storyLengthButton: {
-    padding: 15,
-    borderRadius: 12,
-    borderWidth: 2,
+  storyLengthSelectionContainer: {
     alignItems: 'center',
   },
-  storyLengthText: {
-    fontSize: 16,
-    fontWeight: '600',
+  storyLengthCard: {
+    width: '100%',
+    padding: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    marginBottom: 15,
+    minHeight: 120,
+    justifyContent: 'center',
+  },
+  storyLengthIcon: {
+    fontSize: 48,
+    marginBottom: 10,
+  },
+  storyLengthName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  storyLengthDescription: {
+    fontSize: 14,
+    textAlign: 'center',
+    opacity: 0.9,
+  },
+  storyLengthDotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 8,
+  },
+  storyLengthDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   generateButton: {
     marginHorizontal: 20,
