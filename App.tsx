@@ -1,14 +1,12 @@
 /**
- * AI Story Generator
- * An AI-powered story generator for kids that creates personalized stories
- * where children become the heroes of their own adventures.
+ * AI Story Generator with Contextual Card Backgrounds
+ * Generate personalized stories with theme-based character images and contextual card backgrounds
  *
  * @format
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -19,157 +17,328 @@ import {
   useColorScheme,
   ScrollView,
   Dimensions,
-  Animated,
-  PanResponder,
   Image,
   PermissionsAndroid,
   Platform,
+  Animated,
+  PanResponder,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary, launchCamera, ImagePickerResponse, MediaType } from 'react-native-image-picker';
-import { ChildInfo, StorySettings, Story } from './types/StoryTypes';
+import { LocalAIService, Theme, THEMES, StoryPage } from './services/LocalAIService';
 
-type AppScreen = 'home' | 'settings' | 'story';
-
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 function App(): React.JSX.Element {
-  const [currentScreen, setCurrentScreen] = useState<AppScreen>('home');
-  const [childInfo, setChildInfo] = useState<ChildInfo>({ name: '' });
-  const [settings, setSettings] = useState<StorySettings>({
-    readingLength: 'medium',
-    storyType: 'superhero',
-    theme: 'light',
-  });
-  const [currentStory, setCurrentStory] = useState<Story | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedTheme, setSelectedTheme] = useState<Theme | null>(null);
+  const [personName, setPersonName] = useState('');
+  const [storyPages, setStoryPages] = useState<StoryPage[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState<'home' | 'story'>('home');
   
-  // Carousel states
-  const [readingLengthIndex, setReadingLengthIndex] = useState(1); // medium is default
-  const [storyTypeIndex, setStoryTypeIndex] = useState(0); // superhero is default
+  // Theme selection with swipe
+  const [currentThemeIndex, setCurrentThemeIndex] = useState(0);
+  const themeAnimation = useRef(new Animated.Value(0)).current;
   
-  // Animation values
-  const readingLengthScrollX = useRef(new Animated.Value(0)).current;
-  const storyTypeScrollX = useRef(new Animated.Value(0)).current;
-  const storyPageScrollX = useRef(new Animated.Value(0)).current;
+  // Story length selection
+  const [selectedStoryLength, setSelectedStoryLength] = useState<'short' | 'medium' | 'long'>('medium');
+
+  // Theme swipe navigation
+  const handleThemeSwipe = (direction: 'left' | 'right') => {
+    if (direction === 'left' && currentThemeIndex < THEMES.length - 1) {
+      setCurrentThemeIndex(currentThemeIndex + 1);
+      setSelectedTheme(THEMES[currentThemeIndex + 1]);
+    } else if (direction === 'right' && currentThemeIndex > 0) {
+      setCurrentThemeIndex(currentThemeIndex - 1);
+      setSelectedTheme(THEMES[currentThemeIndex - 1]);
+    }
+  };
+
+  // Theme swipe PanResponder
+  const themePanResponder = useMemo(() => 
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasMinimumDistance = Math.abs(gestureState.dx) > 20;
+        return isHorizontalSwipe && hasMinimumDistance;
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        themeAnimation.setValue(gestureState.dx * 0.5);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const { dx, vx } = gestureState;
+        const threshold = 50;
+        const velocityThreshold = 0.3;
+
+        if (dx > threshold || vx > velocityThreshold) {
+          handleThemeSwipe('right');
+        } else if (dx < -threshold || vx < -velocityThreshold) {
+          handleThemeSwipe('left');
+        }
+
+        Animated.spring(themeAnimation, {
+          toValue: 0,
+          tension: 120,
+          friction: 8,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(themeAnimation, {
+          toValue: 0,
+          tension: 120,
+          friction: 8,
+          useNativeDriver: true,
+        }).start();
+      },
+    }), [currentThemeIndex, themeAnimation]
+  );
+
+  // Swipe navigation
+  const swipeAnimation = useRef(new Animated.Value(0)).current;
+  const cardScale = useRef(new Animated.Value(1)).current;
+  const cardOpacity = useRef(new Animated.Value(1)).current;
+  
+  // Handle swipe navigation with improved responsiveness
+  const handleSwipeNavigation = (dx: number, vx: number) => {
+    const threshold = 30; // Reduced threshold for more sensitivity
+    const velocityThreshold = 0.2; // Reduced velocity threshold
+    const screenWidth = Dimensions.get('window').width;
+    const swipePercentage = Math.abs(dx) / screenWidth;
+
+    console.log('Swipe detected:', { dx, vx, currentPage, totalPages: storyPages.length, swipePercentage });
+
+    // Add visual feedback during swipe
+    if (swipePercentage > 0.1) {
+      Animated.parallel([
+        Animated.timing(cardScale, {
+          toValue: 1 - swipePercentage * 0.1,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(cardOpacity, {
+          toValue: 1 - swipePercentage * 0.3,
+          duration: 100,
+          useNativeDriver: true,
+        })
+      ]).start();
+    }
+
+    if (dx > threshold || vx > velocityThreshold) {
+      // Swipe right - go to previous page
+      console.log('Swipe right - going to previous page');
+      if (currentPage > 0) {
+        setCurrentPage(currentPage - 1);
+      }
+    } else if (dx < -threshold || vx < -velocityThreshold) {
+      // Swipe left - go to next page
+      console.log('Swipe left - going to next page');
+      if (currentPage < storyPages.length - 1) {
+        setCurrentPage(currentPage + 1);
+      }
+    }
+
+    // Reset visual feedback
+    Animated.parallel([
+      Animated.spring(cardScale, {
+        toValue: 1,
+        tension: 100,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.spring(cardOpacity, {
+        toValue: 1,
+        tension: 100,
+        friction: 8,
+        useNativeDriver: true,
+      })
+    ]).start();
+  };
+  
+  // Create PanResponder with improved gesture recognition
+  const panResponder = useMemo(() => 
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // More sensitive horizontal swipe detection
+        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasMinimumDistance = Math.abs(gestureState.dx) > 5;
+        const hasMinimumVelocity = Math.abs(gestureState.vx) > 0.1;
+        
+        return isHorizontalSwipe && (hasMinimumDistance || hasMinimumVelocity);
+      },
+      onPanResponderGrant: () => {
+        console.log('Pan responder granted');
+        // Add haptic feedback if available
+        if (Platform.OS === 'ios') {
+          // Haptic feedback for iOS
+        }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        // Smooth animation following finger movement
+        swipeAnimation.setValue(gestureState.dx * 0.3); // Scale down for smoother effect
+        
+        // Real-time visual feedback
+        const screenWidth = Dimensions.get('window').width;
+        const swipePercentage = Math.abs(gestureState.dx) / screenWidth;
+        
+        if (swipePercentage > 0.1) {
+          Animated.parallel([
+            Animated.timing(cardScale, {
+              toValue: 1 - swipePercentage * 0.05,
+              duration: 50,
+              useNativeDriver: true,
+            }),
+            Animated.timing(cardOpacity, {
+              toValue: 1 - swipePercentage * 0.2,
+              duration: 50,
+              useNativeDriver: true,
+            })
+          ]).start();
+        }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const { dx, vx } = gestureState;
+        handleSwipeNavigation(dx, vx);
+
+        // Smooth reset animation with better spring configuration
+        Animated.parallel([
+          Animated.spring(swipeAnimation, {
+            toValue: 0,
+            tension: 120,
+            friction: 8,
+            useNativeDriver: true,
+          }),
+          Animated.spring(cardScale, {
+            toValue: 1,
+            tension: 120,
+            friction: 8,
+            useNativeDriver: true,
+          }),
+          Animated.spring(cardOpacity, {
+            toValue: 1,
+            tension: 120,
+            friction: 8,
+            useNativeDriver: true,
+          })
+        ]).start();
+      },
+      onPanResponderTerminate: () => {
+        // Reset all animations if gesture is terminated
+        Animated.parallel([
+          Animated.spring(swipeAnimation, {
+            toValue: 0,
+            tension: 120,
+            friction: 8,
+            useNativeDriver: true,
+          }),
+          Animated.spring(cardScale, {
+            toValue: 1,
+            tension: 120,
+            friction: 8,
+            useNativeDriver: true,
+          }),
+          Animated.spring(cardOpacity, {
+            toValue: 1,
+            tension: 120,
+            friction: 8,
+            useNativeDriver: true,
+          })
+        ]).start();
+      },
+    }), [currentPage, storyPages.length, swipeAnimation, cardScale, cardOpacity]
+  );
 
   const isDarkMode = useColorScheme() === 'dark';
   const backgroundStyle = {
     backgroundColor: isDarkMode ? '#1a1a1a' : '#f8f9fa',
   };
-  const textColor = isDarkMode ? '#ffffff' : '#000000';
-  const secondaryTextColor = isDarkMode ? '#cccccc' : '#666666';
 
-  // Carousel data
-  const readingLengths = [
-    { key: 'short', label: 'Short', description: '5 minutes', emoji: '⏰' },
-    { key: 'medium', label: 'Medium', description: '10 minutes', emoji: '📖' },
-    { key: 'long', label: 'Long', description: '15+ minutes', emoji: '📚' },
-  ];
+  // Initialize with first theme selected
+  useEffect(() => {
+    if (THEMES.length > 0 && !selectedTheme) {
+      setSelectedTheme(THEMES[0]);
+      setCurrentThemeIndex(0);
+    }
+  }, []);
 
-  const storyTypes = [
-    { key: 'superhero', label: 'Superhero', emoji: '🦸', description: 'Your child becomes the hero' },
-    { key: 'adventure', label: 'Adventure', emoji: '🗺️', description: 'Epic quests and discoveries' },
-    { key: 'fantasy', label: 'Fantasy', emoji: '🧙', description: 'Magic and mystical creatures' },
-    { key: 'fairy-tale', label: 'Fairy Tale', emoji: '🏰', description: 'Classic tales with a twist' },
-    { key: 'space', label: 'Space', emoji: '🚀', description: 'Journey through the stars' },
-  ];
 
-  const requestStoragePermission = async () => {
+  // Simplified permission handling
+  const requestPermissions = async () => {
     if (Platform.OS === 'android') {
       try {
-        // For Android 13+ (API 33+), use READ_MEDIA_IMAGES
+        // For Android 13+ (API 33+), we don't need READ_EXTERNAL_STORAGE for image picker
         const androidVersion = Platform.Version;
         console.log('Android version:', androidVersion);
         
-        let permission;
         if (androidVersion >= 33) {
-          permission = PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES;
+          // Android 13+ - only need camera permission for camera, no storage permission needed for gallery
+          console.log('Android 13+ detected, using simplified permissions');
+          return true;
         } else {
-          permission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+          // Android 12 and below - check if we already have permissions
+          const cameraPermission = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA);
+          const storagePermission = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE);
+          
+          if (cameraPermission && storagePermission) {
+            console.log('Permissions already granted');
+            return true;
+          }
+          
+          // Only request if we don't have them
+          const granted = await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.CAMERA,
+            PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
+          ]);
+          
+          return Object.values(granted).every(
+            result => result === PermissionsAndroid.RESULTS.GRANTED
+          );
         }
-
-        console.log('Requesting permission:', permission);
-        const granted = await PermissionsAndroid.request(
-          permission,
-          {
-            title: 'Photo Access Permission',
-            message: 'This app needs access to your photos to create personalized stories for your child.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'Allow',
-          }
-        );
-        
-        console.log('Permission result:', granted);
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn('Permission error:', err);
-        return false;
+        console.error('Permission request error:', err);
+        return true; // Allow to proceed anyway
       }
     }
-    return true;
+    return true; // iOS doesn't need explicit permission requests for image picker
   };
 
-  const requestCameraPermission = async () => {
-    if (Platform.OS === 'android') {
-      try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          {
-            title: 'Camera Permission',
-            message: 'This app needs access to your camera to take photos for personalized stories.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'Allow',
-          }
-        );
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
-      } catch (err) {
-        console.warn('Camera permission error:', err);
-        return false;
-      }
-    }
-    return true;
-  };
-
+  // Handle photo selection - simplified approach
   const handlePhotoUpload = async () => {
     console.log('Photo upload button pressed');
     
+    // Try to request permissions first, but don't block if they fail
+    await requestPermissions();
+    
+    // Always show photo options - let the image picker handle permissions
     Alert.alert(
       'Select Photo',
-      'Choose how you want to add a photo:',
+      'Choose how you want to add a photo',
       [
-        {
-          text: 'Camera',
-          onPress: async () => {
-            const hasCameraPermission = await requestCameraPermission();
-            if (!hasCameraPermission) {
-              Alert.alert('Permission Required', 'Please grant camera permission to take photos.');
-              return;
-            }
-            openCamera();
-          }
-        },
-        {
-          text: 'Photo Library',
-          onPress: () => {
-            console.log('Photo library option selected');
-            // Try to open library directly - image picker handles permissions internally
-            openImageLibrary();
-          }
-        },
+        { text: 'Camera', onPress: () => {
+          console.log('Camera option selected');
+          openCamera();
+        }},
+        { text: 'Photo Library', onPress: () => {
+          console.log('Photo library option selected');
+          openImageLibrary();
+        }},
         { text: 'Cancel', style: 'cancel' }
       ]
     );
   };
 
   const openCamera = () => {
+    console.log('Opening camera...');
     const options = {
       mediaType: 'photo' as MediaType,
+      quality: 0.8 as const,
       includeBase64: false,
       maxHeight: 2000,
       maxWidth: 2000,
-      quality: 0.8 as const,
     };
 
     launchCamera(options, handleImagePickerResponse);
@@ -179,794 +348,424 @@ function App(): React.JSX.Element {
     console.log('Opening image library...');
     const options = {
       mediaType: 'photo' as MediaType,
+      quality: 0.8 as const,
       includeBase64: false,
       maxHeight: 2000,
       maxWidth: 2000,
-      quality: 0.8 as const,
-      selectionLimit: 1,
     };
 
-    try {
-      launchImageLibrary(options, (response) => {
-        console.log('Image library response:', response);
-        handleImagePickerResponse(response);
-      });
-    } catch (error) {
-      console.error('Error launching image library:', error);
-      Alert.alert('Error', 'Failed to open photo library. Please try again.');
-    }
+    console.log('Launching image library with options:', options);
+    launchImageLibrary(options, handleImagePickerResponse);
   };
 
   const handleImagePickerResponse = (response: ImagePickerResponse) => {
+    console.log('Image picker response:', response);
+    
     if (response.didCancel) {
-      console.log('User cancelled image picker');
+      console.log('User cancelled image selection');
       return;
     }
     
     if (response.errorMessage) {
-      console.log('ImagePicker Error: ', response.errorMessage);
-      Alert.alert('Error', 'Failed to select image. Please try again.');
+      console.error('Image picker error:', response.errorMessage);
+      Alert.alert('Error', `Failed to select image: ${response.errorMessage}`);
       return;
     }
 
     if (response.assets && response.assets[0]) {
-      setChildInfo(prev => ({ 
-        ...prev, 
-        photoUri: response.assets![0].uri || undefined 
-      }));
-      Alert.alert('Success', 'Photo added successfully!');
+      const imageUri = response.assets[0].uri;
+      if (imageUri) {
+        console.log('Image selected successfully:', imageUri);
+        setSelectedImage(imageUri);
+        setStoryPages([]);
+        setCurrentPage(0);
+        Alert.alert('Success', 'Photo uploaded successfully!');
+      } else {
+        console.error('No image URI in response');
+        Alert.alert('Error', 'Failed to get image URI');
+      }
+    } else {
+      console.error('No assets in response');
+      Alert.alert('Error', 'No image selected');
     }
   };
 
-  const handleContinueFromHome = () => {
-    if (!childInfo.name.trim()) {
-      Alert.alert('Missing Information', 'Please enter your child\'s name to continue.');
+  // Handle theme selection
+  const handleThemeSelect = (theme: Theme) => {
+    setSelectedTheme(theme);
+    setStoryPages([]);
+    setCurrentPage(0);
+  };
+
+  // Generate story content using local AI
+  const generateStoryContent = (theme: Theme, childName: string, length: 'short' | 'medium' | 'long'): Array<{ title: string; text: string }> => {
+    return LocalAIService.generateStoryContent(theme, childName, length);
+  };
+
+  // Generate complete story with local AI
+  const handleGenerateStory = async () => {
+    if (!selectedImage || !selectedTheme || !personName) {
+      Alert.alert('Missing Requirements', 'Please select a photo, theme, and enter a name.');
       return;
     }
-    setCurrentScreen('settings');
+
+    setIsGenerating(true);
+
+    try {
+      // Generate story content with selected length
+      const storyContent = generateStoryContent(selectedTheme, personName, selectedStoryLength);
+      
+      // Generate complete story with local AI
+      const storyPages = LocalAIService.generateCompleteStory(
+        personName,
+        selectedTheme,
+        storyContent
+      );
+
+      setStoryPages(storyPages);
+      setCurrentScreen('story');
+      setCurrentPage(0);
+      Alert.alert(
+        'Story Generated!',
+        `Your personalized ${selectedTheme.name} story is ready!`,
+        [{ text: 'Amazing!' }]
+      );
+    } catch (error) {
+      Alert.alert('Error', 'An error occurred during story generation.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  // AI Story Generation System
-  const generateRandomElement = (array: string[]) => {
-    return array[Math.floor(Math.random() * array.length)];
-  };
 
-  const generateStoryContent = (storyType: string, childName: string, readingLength: string) => {
-    // Story elements for randomization
-    const locations = {
-      superhero: ['a bustling city', 'a quiet neighborhood', 'a magical town', 'a futuristic metropolis', 'a coastal village'],
-      adventure: ['a mysterious island', 'an ancient forest', 'a hidden valley', 'a mountain peak', 'a secret cave'],
-      fantasy: ['a magical kingdom', 'an enchanted realm', 'a mystical forest', 'a crystal palace', 'a floating island'],
-      'fairy-tale': ['a royal castle', 'a magical garden', 'a fairy glen', 'a wishing well', 'a rainbow bridge'],
-      space: ['a distant planet', 'a space station', 'a nebula', 'an asteroid field', 'a galaxy far away']
-    };
-
-    const powers = ['super strength', 'the ability to fly', 'invisibility', 'telepathy', 'healing powers', 'super speed', 'shape-shifting', 'mind control'];
-    const challenges = ['a lost pet', 'a broken bridge', 'a crying child', 'a dangerous storm', 'a locked door', 'a runaway vehicle', 'a trapped animal', 'a confused elderly person'];
-    const villains = ['the Shadow Master', 'Dr. Chaos', 'the Storm King', 'Captain Darkness', 'the Time Thief', 'Professor Mischief', 'the Ice Queen', 'the Shadow Dragon'];
-    const friends = ['a wise owl', 'a talking cat', 'a friendly robot', 'a magical fairy', 'a brave dog', 'a clever fox', 'a gentle giant', 'a sparkling unicorn'];
-
-    const getStoryLength = (length: string) => {
-      switch (length) {
-        case 'short': return { min: 3, max: 4 };
-        case 'medium': return { min: 5, max: 7 };
-        case 'long': return { min: 8, max: 12 };
-        default: return { min: 5, max: 7 };
-      }
-    };
-
-    const lengthConfig = getStoryLength(readingLength);
-    const storyLength = Math.floor(Math.random() * (lengthConfig.max - lengthConfig.min + 1)) + lengthConfig.min;
+  // Render theme selection with swipe
+  const renderThemeSelection = () => {
+    const currentTheme = THEMES[currentThemeIndex];
     
-    let story = [];
-    const location = generateRandomElement(locations[storyType as keyof typeof locations] || locations.superhero);
-    const power = generateRandomElement(powers);
-    const challenge = generateRandomElement(challenges);
-    const villain = generateRandomElement(villains);
-    const friend = generateRandomElement(friends);
-
-    // Generate story based on type and length
-    if (storyType === 'superhero') {
-      story = generateSuperheroStory(childName, location, power, challenge, villain, storyLength);
-    } else if (storyType === 'adventure') {
-      story = generateAdventureStory(childName, location, challenge, friend, storyLength);
-    } else if (storyType === 'fantasy') {
-      story = generateFantasyStory(childName, location, power, friend, villain, storyLength);
-    } else if (storyType === 'fairy-tale') {
-      story = generateFairyTaleStory(childName, location, challenge, friend, storyLength);
-    } else if (storyType === 'space') {
-      story = generateSpaceStory(childName, location, challenge, friend, storyLength);
-    } else {
-      story = generateSuperheroStory(childName, location, power, challenge, villain, storyLength);
-    }
-
-    return story;
-  };
-
-  const generateSuperheroStory = (childName: string, location: string, power: string, challenge: string, villain: string, length: number) => {
-    const story = [];
-    
-    // Opening
-    story.push({
-      title: `The Hero of ${location.split(' ').pop()}`,
-      text: `In ${location}, there lived a brave young hero named ${childName}.`
-    });
-    
-    if (length >= 3) {
-      story.push({
-        title: `A Call to Help`,
-        text: `One day, while walking through the streets, ${childName} noticed ${challenge} and knew they had to help.`
-      });
-    }
-    
-    if (length >= 4) {
-      story.push({
-        title: `The Power Awakens`,
-        text: `Suddenly, ${childName} felt a strange energy coursing through their body. They discovered they had ${power}!`
-      });
-    }
-    
-    if (length >= 5) {
-      story.push({
-        title: `First Heroic Act`,
-        text: `Using their new ability, ${childName} helped solve the problem and felt a deep sense of purpose.`
-      });
-    }
-    
-    if (length >= 6) {
-      story.push({
-        title: `Rising Fame`,
-        text: `Word spread about the young hero, and soon people began calling ${childName} "The Guardian of ${location.split(' ').pop()}".`
-      });
-    }
-    
-    if (length >= 7) {
-      story.push({
-        title: `The Dark Threat`,
-        text: `But then, a new threat emerged: ${villain} was causing chaos throughout the city.`
-      });
-    }
-    
-    if (length >= 8) {
-      story.push({
-        title: `The Ultimate Challenge`,
-        text: `${childName} knew this was their biggest challenge yet. They had to use all their courage and ${power} to stop the villain.`
-      });
-    }
-    
-    if (length >= 9) {
-      story.push({
-        title: `Epic Battle`,
-        text: `In an epic battle, ${childName} outsmarted ${villain} and saved the day. Everyone cheered for their young hero.`
-      });
-    }
-    
-    if (length >= 10) {
-      story.push({
-        title: `A Hero's Legacy`,
-        text: `From that day forward, ${childName} continued to protect ${location}, proving that true heroism comes from the heart.`
-      });
-    }
-    
-    // Ending
-    story.push({
-      title: `The Greatest Hero`,
-      text: `And so ${childName} became the greatest superhero the world had ever known, inspiring others to be kind and brave every day!`
-    });
-    
-    return story;
-  };
-
-  const generateAdventureStory = (childName: string, location: string, challenge: string, friend: string, length: number) => {
-    const story = [];
-    
-    story.push({
-      title: `The Curious Explorer`,
-      text: `Meet ${childName}, a brave young explorer who loved discovering new places.`
-    });
-    
-    if (length >= 3) {
-      story.push({
-        title: `The Mysterious Map`,
-        text: `One day, ${childName} found a mysterious map that led to ${location}.`
-      });
-    }
-    
-    if (length >= 4) {
-      story.push({
-        title: `The Journey Begins`,
-        text: `Excited by the discovery, ${childName} packed their backpack and set off on their adventure.`
-      });
-    }
-    
-    if (length >= 5) {
-      story.push({
-        title: `A New Friend`,
-        text: `Along the way, ${childName} met ${friend}, who became their trusted companion.`
-      });
-    }
-    
-    if (length >= 6) {
-      story.push({
-        title: `Facing Challenges`,
-        text: `The journey was filled with challenges - ${challenge} tested ${childName}'s resolve.`
-      });
-    }
-    
-    if (length >= 7) {
-      story.push({
-        title: `Overcoming Obstacles`,
-        text: `With ${friend}'s help, ${childName} overcame every obstacle and learned valuable lessons about courage and friendship.`
-      });
-    }
-    
-    if (length >= 8) {
-      story.push({
-        title: `The Hidden Treasure`,
-        text: `When they finally reached ${location}, ${childName} discovered a treasure beyond their wildest dreams.`
-      });
-    }
-    
-    if (length >= 9) {
-      story.push({
-        title: `The Real Treasure`,
-        text: `But the greatest treasure of all was the confidence and wisdom ${childName} gained from their amazing adventure.`
-      });
-    }
-    
-    story.push({
-      title: `The Adventure Continues`,
-      text: `From that day forward, ${childName} continued to explore the world, always ready for the next great adventure!`
-    });
-    
-    return story;
-  };
-
-  const generateFantasyStory = (childName: string, location: string, power: string, friend: string, villain: string, length: number) => {
-    const story = [];
-    
-    story.push({
-      title: `The Young Wizard`,
-      text: `In ${location}, there lived a young wizard named ${childName}.`
-    });
-    
-    if (length >= 3) {
-      story.push({
-        title: `The Ancient Gift`,
-        text: `One magical morning, ${childName} discovered they possessed the ancient gift of ${power}.`
-      });
-    }
-    
-    if (length >= 4) {
-      story.push({
-        title: `The Wise Mentor`,
-        text: `A wise mentor appeared and began teaching ${childName} how to control their magical abilities.`
-      });
-    }
-    
-    if (length >= 5) {
-      story.push({
-        title: `A Magical Companion`,
-        text: `${childName} made friends with ${friend}, who became their magical companion.`
-      });
-    }
-    
-    if (length >= 6) {
-      story.push({
-        title: `Learning Balance`,
-        text: `Together, they learned about the balance between light and dark magic.`
-      });
-    }
-    
-    if (length >= 7) {
-      story.push({
-        title: `The Dark Threat`,
-        text: `But then, ${villain} threatened to steal all the magic from ${location}.`
-      });
-    }
-    
-    if (length >= 8) {
-      story.push({
-        title: `Preparing for Battle`,
-        text: `${childName} knew they had to act. With ${friend}'s help, they prepared for the ultimate magical battle.`
-      });
-    }
-    
-    if (length >= 9) {
-      story.push({
-        title: `The Final Battle`,
-        text: `Using their ${power} and the power of friendship, ${childName} defeated ${villain} and restored magic to the realm.`
-      });
-    }
-    
-    if (length >= 10) {
-      story.push({
-        title: `The Greatest Wizard`,
-        text: `From that day forward, ${childName} became the greatest wizard the kingdom had ever known.`
-      });
-    }
-    
-    story.push({
-      title: `Magic from the Heart`,
-      text: `They continued to use their magic to spread joy and help others, proving that true magic comes from the heart!`
-    });
-    
-    return story;
-  };
-
-  const generateFairyTaleStory = (childName: string, location: string, challenge: string, friend: string, length: number) => {
-    const story = [];
-    
-    story.push({
-      title: `The Kind Princess`,
-      text: `Once upon a time, in ${location}, there lived a kind princess named ${childName}.`
-    });
-    
-    if (length >= 3) {
-      story.push({
-        title: `A Heart of Gold`,
-        text: `${childName} was known throughout the kingdom for their kindness to all creatures, great and small.`
-      });
-    }
-    
-    if (length >= 4) {
-      story.push({
-        title: `A Cry for Help`,
-        text: `One day, while exploring the royal gardens, ${childName} found ${challenge} and knew they had to help.`
-      });
-    }
-    
-    if (length >= 5) {
-      story.push({
-        title: `A Magical Meeting`,
-        text: `Gently, ${childName} helped solve the problem, and in return, they met ${friend}.`
-      });
-    }
-    
-    if (length >= 6) {
-      story.push({
-        title: `A Special Gift`,
-        text: `${friend} was so moved by ${childName}'s kindness that they granted them a special gift.`
-      });
-    }
-    
-    if (length >= 7) {
-      story.push({
-        title: `The Power of Kindness`,
-        text: `"You have shown me that true royalty comes from the heart," said ${friend}. "I grant you the power to bring joy to everyone you meet."`
-      });
-    }
-    
-    if (length >= 8) {
-      story.push({
-        title: `Magical Abilities`,
-        text: `From that moment on, ${childName} discovered they could make flowers bloom with a smile and bring hope to the hopeless.`
-      });
-    }
-    
-    if (length >= 9) {
-      story.push({
-        title: `Fame Spreads`,
-        text: `News of the magical princess spread throughout the kingdom, and people traveled from distant lands to experience ${childName}'s gift.`
-      });
-    }
-    
-    if (length >= 10) {
-      story.push({
-        title: `Banishing Darkness`,
-        text: `When darkness threatened the kingdom, ${childName} used their gift to organize a great celebration that banished the darkness forever.`
-      });
-    }
-    
-    story.push({
-      title: `Happily Ever After`,
-      text: `And so ${childName} lived happily ever after, proving that the greatest magic of all is the power of love and kindness!`
-    });
-    
-    return story;
-  };
-
-  const generateSpaceStory = (childName: string, location: string, challenge: string, friend: string, length: number) => {
-    const story = [];
-    
-    story.push({
-      title: `The Young Astronaut`,
-      text: `Meet ${childName}, a brilliant young astronaut whose imagination soared higher than any rocket ship.`
-    });
-    
-    if (length >= 3) {
-      story.push({
-        title: `The Secret Mission`,
-        text: `One day, ${childName} was chosen for a top-secret mission to explore ${location}.`
-      });
-    }
-    
-    if (length >= 4) {
-      story.push({
-        title: `The Stellar Explorer`,
-        text: `Their spaceship, the Stellar Explorer, was equipped with the most advanced technology ever created.`
-      });
-    }
-    
-    if (length >= 5) {
-      story.push({
-        title: `Cosmic Wonders`,
-        text: `As ${childName} journeyed through space, they encountered breathtaking phenomena and cosmic wonders.`
-      });
-    }
-    
-    if (length >= 6) {
-      story.push({
-        title: `First Contact`,
-        text: `On ${location}, ${childName} discovered an ancient civilization and met ${friend}.`
-      });
-    }
-    
-    if (length >= 7) {
-      story.push({
-        title: `Learning Together`,
-        text: `${friend} taught ${childName} about their advanced science and philosophy of universal harmony.`
-      });
-    }
-    
-    if (length >= 8) {
-      story.push({
-        title: `The Cosmic Mystery`,
-        text: `Together, they worked to solve a cosmic mystery: ${challenge}.`
-      });
-    }
-    
-    if (length >= 9) {
-      story.push({
-        title: `Saving the Galaxy`,
-        text: `Using Earth technology and alien wisdom, they discovered a solution that saved not just one planet, but an entire galaxy.`
-      });
-    }
-    
-    if (length >= 10) {
-      story.push({
-        title: `A Gift of Communication`,
-        text: `In gratitude, ${friend} gave ${childName} a crystal that would allow them to communicate with any intelligent life in the universe.`
-      });
-    }
-    
-    story.push({
-      title: `Inspiring Future Explorers`,
-      text: `When ${childName} returned to Earth, they shared their incredible discoveries and inspired a new generation of space explorers!`
-    });
-    
-    return story;
-  };
-
-  const handleGenerateStory = () => {
-    const selectedReadingLength = readingLengths[readingLengthIndex].key;
-    const selectedStoryType = storyTypes[storyTypeIndex].key;
-    
-    const storyContent = generateStoryContent(selectedStoryType, childInfo.name, selectedReadingLength);
-    
-    const mockStory: Story = {
-      id: Date.now().toString(),
-      title: `${childInfo.name}'s ${selectedStoryType.charAt(0).toUpperCase() + selectedStoryType.slice(1)} Adventure`,
-      childName: childInfo.name,
-      settings: {
-        ...settings,
-        readingLength: selectedReadingLength as any,
-        storyType: selectedStoryType as any,
-      },
-      pages: storyContent.map((page, index) => {
-        if (typeof page === 'string') {
-          return {
-            id: (index + 1).toString(),
-            title: `Page ${index + 1}`,
-            text: page,
-            pageNumber: index + 1,
-          };
-        } else {
-          return {
-            id: (index + 1).toString(),
-            title: page.title,
-            text: page.text,
-            pageNumber: index + 1,
-          };
-        }
-      }),
-      createdAt: new Date(),
-      isCompleted: false,
-    };
-    setCurrentStory(mockStory);
-    setCurrentPage(0);
-    setCurrentScreen('story');
-  };
-
-  const renderHomeScreen = () => (
-    <View style={styles.content}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: textColor }]}>
-          AI Story Generator
-        </Text>
-        <Text style={[styles.subtitle, { color: secondaryTextColor }]}>
-          Create magical personalized stories for your child
-        </Text>
-      </View>
-
-      <View style={styles.form}>
-        <View style={styles.inputContainer}>
-          <Text style={[styles.label, { color: textColor }]}>
-            Child's Name
-          </Text>
-          <TextInput
-            style={[styles.input, { 
-              color: textColor, 
-              borderColor: isDarkMode ? '#444' : '#ddd',
-              backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff'
-            }]}
-            placeholder="Enter your child's name"
-            placeholderTextColor={secondaryTextColor}
-            value={childInfo.name}
-            onChangeText={(text) => setChildInfo(prev => ({ ...prev, name: text }))}
-            autoCapitalize="words"
-          />
-        </View>
-
-        <View style={styles.photoContainer}>
-          <Text style={[styles.label, { color: textColor }]}>
-            Child's Photo (Optional)
-          </Text>
-          <TouchableOpacity 
-            style={[styles.photoButton, { 
-              borderColor: isDarkMode ? '#444' : '#ddd',
-              backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff'
-            }]}
-            onPress={handlePhotoUpload}
-          >
-            {childInfo.photoUri ? (
-              <Image source={{ uri: childInfo.photoUri }} style={styles.photoPreview} />
-            ) : (
-              <View style={styles.photoPlaceholder}>
-                <Text style={[styles.photoPlaceholderText, { color: secondaryTextColor }]}>
-                  📷 Tap to add photo
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <TouchableOpacity 
-        style={[styles.continueButton, { 
-          backgroundColor: childInfo.name.trim() ? '#007AFF' : '#ccc' 
-        }]}
-        onPress={handleContinueFromHome}
-        disabled={!childInfo.name.trim()}
-      >
-        <Text style={styles.continueButtonText}>
-          Create Story
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderCarousel = (items: any[], selectedIndex: number, onIndexChange: (index: number) => void, itemWidth: number = screenWidth * 0.8) => {
     return (
-      <View style={styles.carouselContainer}>
-        <Animated.ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={itemWidth + 20}
-          decelerationRate="fast"
-          contentContainerStyle={styles.carouselContent}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { x: readingLengthScrollX } } }],
-            { useNativeDriver: false }
-          )}
+      <View style={styles.themeSelectionContainer}>
+        {/* Theme Card */}
+        <Animated.View
+          style={[
+            styles.themeCard,
+            {
+              backgroundColor: currentTheme.color,
+              transform: [{ translateX: themeAnimation }]
+            }
+          ]}
+          {...themePanResponder.panHandlers}
         >
-          {items.map((item, index) => (
-            <TouchableOpacity
-              key={item.key}
+          <Text style={styles.themeIcon}>{currentTheme.icon}</Text>
+          <Text style={[styles.themeName, { color: '#ffffff' }]}>
+            {currentTheme.name}
+          </Text>
+          <Text style={[styles.themeDescription, { color: '#ffffff' }]}>
+            {currentTheme.description}
+          </Text>
+        </Animated.View>
+        
+        {/* Theme Dots */}
+        <View style={styles.themeDotsContainer}>
+          {THEMES.map((_, index) => (
+            <View
+              key={index}
               style={[
-                styles.carouselItem,
+                styles.themeDot,
                 {
-                  width: itemWidth,
-                  backgroundColor: selectedIndex === index 
-                    ? '#007AFF' 
-                    : isDarkMode ? '#2a2a2a' : '#ffffff',
-                  borderColor: isDarkMode ? '#444' : '#ddd',
+                  backgroundColor: index === currentThemeIndex ? currentTheme.color : isDarkMode ? '#666' : '#ccc',
+                  opacity: index === currentThemeIndex ? 1 : 0.5
                 }
               ]}
-              onPress={() => onIndexChange(index)}
-            >
-              <Text style={styles.carouselEmoji}>{item.emoji}</Text>
-              <Text style={[
-                styles.carouselTitle,
-                { color: selectedIndex === index ? '#ffffff' : textColor }
-              ]}>
-                {item.label}
-              </Text>
-              <Text style={[
-                styles.carouselDescription,
-                { color: selectedIndex === index ? '#e6f3ff' : secondaryTextColor }
-              ]}>
-                {item.description}
-              </Text>
-            </TouchableOpacity>
+            />
           ))}
-        </Animated.ScrollView>
+        </View>
+        
+        {/* Swipe Instructions */}
+        <Text style={[styles.swipeInstruction, { color: isDarkMode ? '#cccccc' : '#666666' }]}>
+          ← Swipe to choose theme →
+        </Text>
       </View>
     );
   };
 
-  const renderSettingsScreen = () => (
-    <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => setCurrentScreen('home')}
-        >
-          <Text style={[styles.backButtonText, { color: '#007AFF' }]}>
-            ← Back
-          </Text>
-        </TouchableOpacity>
-        
-        <Text style={[styles.title, { color: textColor }]}>
-          Story Settings
-        </Text>
-        <Text style={[styles.subtitle, { color: secondaryTextColor }]}>
-          Customize {childInfo.name}'s story
-        </Text>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: textColor }]}>
-          Reading Length
-        </Text>
-        <Text style={[styles.sectionSubtitle, { color: secondaryTextColor }]}>
-          Swipe to select reading time
-        </Text>
-        {renderCarousel(readingLengths, readingLengthIndex, setReadingLengthIndex)}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: textColor }]}>
-          Story Type
-        </Text>
-        <Text style={[styles.sectionSubtitle, { color: secondaryTextColor }]}>
-          Swipe to select story theme
-        </Text>
-        {renderCarousel(storyTypes, storyTypeIndex, setStoryTypeIndex)}
-      </View>
-
-      <TouchableOpacity 
-        style={styles.generateButton}
-        onPress={handleGenerateStory}
-      >
-        <Text style={styles.generateButtonText}>
-          Generate {childInfo.name}'s Story
-        </Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-
-  const renderStoryScreen = () => {
-    if (!currentStory) return null;
-
-    const panResponder = PanResponder.create({
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return Math.abs(gestureState.dx) > 20;
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        // Handle swipe gestures
-      },
-      onPanResponderRelease: (evt, gestureState) => {
-        const { dx } = gestureState;
-        const threshold = 50;
-        
-        if (dx > threshold && currentPage > 0) {
-          // Swipe right - go to previous page
-          setCurrentPage(currentPage - 1);
-        } else if (dx < -threshold && currentPage < currentStory.pages.length - 1) {
-          // Swipe left - go to next page
-          setCurrentPage(currentPage + 1);
-        }
-      },
-    });
-
-    const currentPageData = currentStory.pages[currentPage];
-
+  // Render story card
+  const renderStoryCard = (page: StoryPage) => {
+    const textColor = isDarkMode ? '#ffffff' : '#000000';
+    
     return (
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => setCurrentScreen('settings')}
-          >
-            <Text style={[styles.backButtonText, { color: '#007AFF' }]}>
-              ← Back
-            </Text>
-          </TouchableOpacity>
-          
-          <Text style={[styles.storyTitle, { color: textColor }]}>
-            {currentStory.title}
-          </Text>
-          <Text style={[styles.storyInfo, { color: secondaryTextColor }]}>
-            {currentStory.settings.readingLength.charAt(0).toUpperCase() + currentStory.settings.readingLength.slice(1)} • Page {currentPage + 1} of {currentStory.pages.length}
-          </Text>
-        </View>
-
-        <View style={styles.storyPageContainer} {...panResponder.panHandlers}>
-          <View style={[styles.storyPage, { backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff' }]}>
-            {childInfo.photoUri && (
-              <View style={styles.storyPhotoContainer}>
-                <Image source={{ uri: childInfo.photoUri }} style={styles.storyPhoto} />
-                <Text style={[styles.storyPhotoLabel, { color: secondaryTextColor }]}>
-                  {childInfo.name}
-                </Text>
+      <View style={styles.storyCard}>
+        {/* Internet Theme Image as Background */}
+        {page.internetImage && (
+          <Image 
+            source={{ uri: page.internetImage }} 
+            style={styles.cardBackgroundImage}
+            resizeMode="cover"
+            onLoad={() => console.log('Background image loaded successfully:', page.internetImage)}
+            onError={(error) => {
+              console.log('Failed to load background image:', page.internetImage);
+              console.log('Image error:', error);
+            }}
+          />
+        )}
+        
+        {/* Dark Overlay for Better Text Readability */}
+        <View style={styles.cardOverlay} />
+        
+        {/* Card Content */}
+        <View style={styles.cardContent}>
+          {/* Character Image */}
+          <View style={styles.characterImageContainer}>
+            {selectedImage ? (
+              <Image 
+                source={{ uri: selectedImage }} 
+                style={styles.characterImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={[styles.characterImagePlaceholder, { backgroundColor: page.theme.color }]}>
+                <Text style={styles.characterImageText}>{page.theme.icon}</Text>
               </View>
             )}
-            <Text style={[styles.pageTitle, { color: textColor }]}>
-              {currentPageData.title}
+          </View>
+          
+          {/* Story Content */}
+          <View style={styles.storyContent}>
+            <Text style={[styles.storyTitle, { color: '#ffffff' }]}>
+              {page.title}
             </Text>
-            <Text style={[styles.storyText, { color: textColor }]}>
-              {currentPageData.text}
+            <Text style={[styles.storyText, { color: '#ffffff' }]}>
+              {page.text}
+            </Text>
+            
+            {/* Theme Icon */}
+            <View style={styles.themeIconContainer}>
+              <Text style={styles.themeIconText}>{page.theme.icon}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  // Render story screen
+  const renderStoryScreen = () => {
+    if (storyPages.length === 0) return null;
+
+    const currentPageData = storyPages[currentPage];
+    const textColor = isDarkMode ? '#ffffff' : '#000000';
+
+    return (
+      <View style={styles.storyScreen}>
+        {/* Header */}
+        <View style={styles.storyHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => setCurrentScreen('home')}
+          >
+            <Text style={[styles.backButtonText, { color: textColor }]}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={[styles.storyHeaderTitle, { color: textColor }]}>
+            {selectedTheme?.name} Adventure
+          </Text>
+          <View style={styles.pageIndicator}>
+            <Text style={[styles.pageIndicatorText, { color: textColor }]}>
+              {currentPage + 1} / {storyPages.length}
             </Text>
           </View>
-          <Text style={[styles.swipeInstruction, { color: secondaryTextColor }]}>
-            Swipe left or right to navigate pages
-          </Text>
         </View>
 
-        <View style={styles.pageNavigation}>
-          <TouchableOpacity 
+        {/* Story Card with Swipe */}
+        <Animated.View
+          style={[
+            styles.storyCardContainer,
+            {
+              transform: [
+                { translateX: swipeAnimation },
+                { scale: cardScale }
+              ],
+              opacity: cardOpacity
+            }
+          ]}
+          {...panResponder.panHandlers}
+        >
+          <ScrollView 
+            style={styles.storyScrollView} 
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={true}
+            nestedScrollEnabled={true}
+          >
+            {renderStoryCard(currentPageData)}
+          </ScrollView>
+        </Animated.View>
+
+        {/* Page Dots */}
+        <View style={styles.pageDotsContainer}>
+          {storyPages.map((_, index) => (
+            <View
+              key={index}
+              style={[
+                styles.pageDot,
+                {
+                  backgroundColor: index === currentPage 
+                    ? selectedTheme?.color || '#007AFF' 
+                    : isDarkMode ? '#666' : '#ccc',
+                  opacity: index === currentPage ? 1 : 0.5
+                }
+              ]}
+            />
+          ))}
+        </View>
+
+        {/* Swipe Instruction */}
+        <Text style={[styles.swipeInstruction, { color: isDarkMode ? '#ccc' : '#666' }]}>
+          ← Swipe left/right to navigate →
+        </Text>
+
+        {/* Navigation */}
+        <View style={styles.storyNavigation}>
+          <TouchableOpacity
             style={[
               styles.navButton,
-              { opacity: currentPage === 0 ? 0.3 : 1 }
+              { 
+                backgroundColor: currentPage > 0 ? selectedTheme?.color : '#666',
+                opacity: currentPage > 0 ? 1 : 0.5
+              }
             ]}
             onPress={() => setCurrentPage(Math.max(0, currentPage - 1))}
             disabled={currentPage === 0}
           >
-            <Text style={[styles.navButtonText, { color: '#007AFF' }]}>
-              ← Previous
-            </Text>
+            <Text style={styles.navButtonText}>← Previous</Text>
           </TouchableOpacity>
-          
-          <View style={styles.pageDots}>
-            {currentStory.pages.map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.pageDot,
-                  {
-                    backgroundColor: index === currentPage ? '#007AFF' : isDarkMode ? '#444' : '#ddd'
-                  }
-                ]}
-              />
-            ))}
-          </View>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={[
               styles.navButton,
-              { opacity: currentPage === currentStory.pages.length - 1 ? 0.3 : 1 }
+              { 
+                backgroundColor: currentPage < storyPages.length - 1 ? selectedTheme?.color : '#666',
+                opacity: currentPage < storyPages.length - 1 ? 1 : 0.5
+              }
             ]}
-            onPress={() => setCurrentPage(Math.min(currentStory.pages.length - 1, currentPage + 1))}
-            disabled={currentPage === currentStory.pages.length - 1}
+            onPress={() => setCurrentPage(Math.min(storyPages.length - 1, currentPage + 1))}
+            disabled={currentPage === storyPages.length - 1}
           >
-            <Text style={[styles.navButtonText, { color: '#007AFF' }]}>
-              Next →
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.storyActions}>
-          <TouchableOpacity 
-            style={styles.restartButton}
-            onPress={() => setCurrentScreen('home')}
-          >
-            <Text style={[styles.restartButtonText, { color: '#007AFF' }]}>
-              Start Over
-            </Text>
+            <Text style={styles.navButtonText}>Next →</Text>
           </TouchableOpacity>
         </View>
       </View>
+    );
+  };
+
+  // Render home screen
+  const renderHomeScreen = () => {
+    const textColor = isDarkMode ? '#ffffff' : '#000000';
+    const secondaryTextColor = isDarkMode ? '#cccccc' : '#666666';
+
+    return (
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.container}>
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: textColor }]}>
+              📚 AI Story Generator
+            </Text>
+            <Text style={[styles.subtitle, { color: secondaryTextColor }]}>
+              Create personalized stories with contextual card backgrounds
+            </Text>
+          </View>
+
+          {/* Person Name Input */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: textColor }]}>Child's Name</Text>
+            <TextInput
+              style={[styles.textInput, { 
+                backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff',
+                borderColor: isDarkMode ? '#444' : '#ddd',
+                color: textColor
+              }]}
+              value={personName}
+              onChangeText={setPersonName}
+              placeholder="Enter the child's name"
+              placeholderTextColor={secondaryTextColor}
+            />
+          </View>
+
+          {/* Photo Upload */}
+          <View style={styles.photoSection}>
+            <Text style={[styles.sectionTitle, { color: textColor }]}>1. Upload Photo</Text>
+            <TouchableOpacity
+              style={[styles.uploadButton, { 
+                backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff',
+                borderColor: isDarkMode ? '#444' : '#ddd'
+              }]}
+              onPress={handlePhotoUpload}
+            >
+              {selectedImage ? (
+                <Image source={{ uri: selectedImage }} style={styles.uploadedImage} />
+              ) : (
+                <View style={styles.uploadPlaceholder}>
+                  <Text style={[styles.uploadIcon, { color: secondaryTextColor }]}>📷</Text>
+                  <Text style={[styles.uploadText, { color: textColor }]}>Tap to upload photo</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* Theme Selection */}
+          <View style={styles.themeSection}>
+            <Text style={[styles.sectionTitle, { color: textColor }]}>2. Choose Theme</Text>
+            {renderThemeSelection()}
+          </View>
+
+          {/* Story Length Selection */}
+          <View style={styles.storyLengthSection}>
+            <Text style={[styles.sectionTitle, { color: textColor }]}>3. Story Length</Text>
+            <View style={styles.storyLengthContainer}>
+              {(['short', 'medium', 'long'] as const).map((length) => (
+                <TouchableOpacity
+                  key={length}
+                  style={[
+                    styles.storyLengthButton,
+                    {
+                      backgroundColor: selectedStoryLength === length ? '#007AFF' : isDarkMode ? '#2a2a2a' : '#ffffff',
+                      borderColor: selectedStoryLength === length ? '#007AFF' : isDarkMode ? '#444' : '#ddd',
+                    }
+                  ]}
+                  onPress={() => setSelectedStoryLength(length)}
+                >
+                  <Text style={[
+                    styles.storyLengthText,
+                    { color: selectedStoryLength === length ? '#ffffff' : textColor }
+                  ]}>
+                    {length === 'short' ? '📖 Short (5 pages)' : 
+                     length === 'medium' ? '📚 Medium (7 pages)' : 
+                     '📜 Long (15 pages)'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+
+          {/* Generate Button */}
+          <TouchableOpacity
+            style={[
+              styles.generateButton,
+              {
+                backgroundColor: (selectedImage && selectedTheme && personName) ? '#007AFF' : '#666',
+                opacity: (selectedImage && selectedTheme && personName) ? 1 : 0.5
+              }
+            ]}
+            onPress={handleGenerateStory}
+            disabled={!selectedImage || !selectedTheme || !personName || isGenerating}
+          >
+            <Text style={styles.generateButtonText}>
+              {isGenerating ? '🔄 Generating Story...' : '✨ Generate Story'}
+            </Text>
+          </TouchableOpacity>
+
+
+        </View>
+      </ScrollView>
     );
   };
 
@@ -976,10 +775,7 @@ function App(): React.JSX.Element {
         barStyle={isDarkMode ? 'light-content' : 'dark-content'}
         backgroundColor={backgroundStyle.backgroundColor}
       />
-      
-      {currentScreen === 'home' && renderHomeScreen()}
-      {currentScreen === 'settings' && renderSettingsScreen()}
-      {currentScreen === 'story' && renderStoryScreen()}
+      {currentScreen === 'home' ? renderHomeScreen() : renderStoryScreen()}
     </SafeAreaView>
   );
 }
@@ -988,300 +784,342 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  content: {
+  scrollView: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 30,
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    marginBottom: 10,
-  },
-  backButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
+    paddingVertical: 20,
+    paddingHorizontal: 20,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
   },
-  storyTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  storyInfo: {
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  form: {
-    flex: 1,
-  },
   inputContainer: {
-    marginBottom: 30,
-  },
-  label: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 10,
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-  },
-  photoContainer: {
-    marginBottom: 30,
-  },
-  photoButton: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    height: 120,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  photoPlaceholder: {
-    alignItems: 'center',
-  },
-  photoPlaceholderText: {
-    fontSize: 16,
-  },
-  photoPreview: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 10,
-  },
-  continueButton: {
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
+    paddingHorizontal: 20,
     marginBottom: 20,
   },
-  continueButtonText: {
-    color: '#ffffff',
-    fontSize: 18,
+  inputLabel: {
+    fontSize: 16,
     fontWeight: '600',
+    marginBottom: 8,
   },
-  section: {
+  textInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+  },
+  photoSection: {
+    paddingHorizontal: 20,
     marginBottom: 30,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 5,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
+    fontSize: 18,
+    fontWeight: 'bold',
     marginBottom: 15,
+  },
+  uploadButton: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 200,
+  },
+  uploadPlaceholder: {
+    alignItems: 'center',
+  },
+  uploadIcon: {
+    fontSize: 48,
+    marginBottom: 10,
+  },
+  uploadText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  uploadedImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: 8,
+  },
+  themeSection: {
+    paddingHorizontal: 20,
+    marginBottom: 30,
+  },
+  themeSelectionContainer: {
+    alignItems: 'center',
+  },
+  themeCard: {
+    width: '100%',
+    padding: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    marginBottom: 15,
+    minHeight: 120,
+    justifyContent: 'center',
+  },
+  themeIcon: {
+    fontSize: 48,
+    marginBottom: 10,
+  },
+  themeName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
     textAlign: 'center',
   },
-  optionButton: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+  themeDescription: {
+    fontSize: 14,
+    textAlign: 'center',
+    opacity: 0.9,
   },
-  optionContent: {
+  themeDotsContainer: {
     flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 8,
+  },
+  themeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  storyLengthSection: {
+    paddingHorizontal: 20,
+    marginBottom: 30,
+  },
+  storyLengthContainer: {
+    gap: 10,
+  },
+  storyLengthButton: {
+    padding: 15,
+    borderRadius: 12,
+    borderWidth: 2,
     alignItems: 'center',
   },
-  optionEmoji: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  optionText: {
-    flex: 1,
-  },
-  optionTitle: {
+  storyLengthText: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4,
-  },
-  optionDescription: {
-    fontSize: 14,
   },
   generateButton: {
-    backgroundColor: '#007AFF',
+    marginHorizontal: 20,
+    paddingVertical: 15,
     borderRadius: 12,
-    paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 30,
-    marginTop: 10,
   },
   generateButtonText: {
     color: '#ffffff',
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
-  carouselContainer: {
-    marginBottom: 20,
-  },
-  carouselContent: {
-    paddingHorizontal: 10,
-  },
-  carouselItem: {
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 10,
-    alignItems: 'center',
-    minHeight: 120,
-    justifyContent: 'center',
-  },
-  carouselEmoji: {
-    fontSize: 32,
-    marginBottom: 10,
-  },
-  carouselTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 5,
-    textAlign: 'center',
-  },
-  carouselDescription: {
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  storyPageContainer: {
+  // Story Screen Styles
+  storyScreen: {
     flex: 1,
-    marginBottom: 20,
   },
-  storyPage: {
-    flex: 1,
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-    justifyContent: 'center',
-  },
-  pageNavigation: {
+  storyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 20,
     paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
   },
-  navButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 8,
+  backButton: {
+    padding: 8,
   },
-  navButtonText: {
+  backButtonText: {
     fontSize: 16,
+    fontWeight: '600',
+  },
+  storyHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  pageIndicator: {
+    padding: 8,
+  },
+  pageIndicatorText: {
+    fontSize: 14,
     fontWeight: '500',
   },
-  pageDots: {
+  storyCardContainer: {
+    flex: 1,
+    // Add subtle shadow for depth during swipe
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  storyScrollView: {
+    flex: 1,
+    padding: 20,
+  },
+  pageDotsContainer: {
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 15,
+    gap: 8,
   },
   pageDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginHorizontal: 4,
   },
   swipeInstruction: {
-    fontSize: 12,
     textAlign: 'center',
-    marginTop: 10,
+    fontSize: 12,
     fontStyle: 'italic',
+    marginBottom: 10,
   },
-  storyPhotoContainer: {
+  storyCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    minHeight: screenHeight * 0.65,
+    backgroundColor: '#666666', // Fallback color if image fails to load
+  },
+  cardBackgroundImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  cardOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+  },
+  cardBackgroundPlaceholder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0.3,
+  },
+  cardContent: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'space-between',
+    zIndex: 1,
+  },
+  characterImageContainer: {
     alignItems: 'center',
     marginBottom: 20,
   },
-  storyPhoto: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 3,
-    borderColor: '#007AFF',
+  characterImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    borderColor: '#ffffff',
   },
-  storyPhotoLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 8,
+  characterImagePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  storyContainer: {
+  characterImageText: {
+    fontSize: 48,
+  },
+  themeIconContainer: {
+    alignItems: 'center',
+    marginTop: 15,
+    padding: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 20,
+  },
+  themeIconText: {
+    fontSize: 32,
+  },
+  storyContent: {
     flex: 1,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    justifyContent: 'center',
   },
-  storyTextContainer: {
-    flex: 1,
-  },
-  pageContainer: {
-    marginBottom: 20,
-  },
-  pageTitle: {
-    fontSize: 18,
+  storyTitle: {
+    fontSize: 26,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 15,
-    marginTop: 10,
-  },
-  pageNumber: {
-    fontSize: 12,
-    fontWeight: '500',
-    textAlign: 'center',
-    marginBottom: 10,
-    opacity: 0.7,
+    marginBottom: 20,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
   },
   storyText: {
-    fontSize: 18,
-    lineHeight: 28,
-    textAlign: 'left',
+    fontSize: 19,
+    lineHeight: 30,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
+    marginBottom: 20,
   },
-  pageBreak: {
-    height: 1,
-    marginTop: 20,
-    marginBottom: 10,
+  contextualBackground: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 10,
   },
-  storyActions: {
-    paddingTop: 10,
-    alignItems: 'center',
+  contextualBackgroundText: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 20,
   },
-  restartButton: {
-    borderWidth: 1,
-    borderColor: '#007AFF',
+  storyNavigation: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#ddd',
+  },
+  navButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 14,
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 30,
+    minWidth: 120,
     alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
-  restartButtonText: {
+  navButtonText: {
+    color: '#ffffff',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
 });
 
